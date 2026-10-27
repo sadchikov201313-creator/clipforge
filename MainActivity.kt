@@ -13,22 +13,28 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -50,8 +56,12 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import java.io.File
+import kotlin.math.abs
 
 data class Seg(val a: Long, val b: Long)
+
+val Cyan = Color(0xFF25F4EE)
+val Grey = Color(0xFFB4B4C6)
 
 fun fmt(ms: Long) = "%d:%02d.%d".format(ms / 60000, (ms / 1000) % 60, (ms % 1000) / 100)
 
@@ -59,34 +69,34 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val scheme = darkColorScheme(
-            primary = Color(0xFF9D8CFF), onPrimary = Color(0xFF1B1240),
-            secondary = Color(0xFF5EEAD4),
-            background = Color(0xFF0D0D12), surface = Color(0xFF17171F),
-            surfaceVariant = Color(0xFF2A2A38),
-            onBackground = Color(0xFFECECF4), onSurface = Color(0xFFECECF4),
-            onSurfaceVariant = Color(0xFFB4B4C6)
+            primary = Cyan, onPrimary = Color.Black,
+            background = Color.Black, surface = Color.Black,
+            onBackground = Color.White, onSurface = Color.White,
+            surfaceVariant = Color(0xFF2A2A38), onSurfaceVariant = Grey
         )
         setContent {
             MaterialTheme(colorScheme = scheme) {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Editor() }
+                Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) { Editor() }
             }
         }
     }
 }
 
 @Composable
-fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            content()
-        }
+fun Tool(icon: String, label: String, on: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = if (!enabled) Color(0xFF555566) else if (on) Cyan else Color.White
+    Column(
+        modifier = Modifier.width(70.dp).clickable(enabled = enabled, onClick = onClick).padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(icon, fontSize = 20.sp)
+        Text(label, fontSize = 10.sp, color = c, maxLines = 2, textAlign = TextAlign.Center, lineHeight = 12.sp)
     }
 }
 
 @Composable
 fun Labeled(label: String, value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
-    Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(label, fontSize = 13.sp, color = Grey)
     Slider(value = value, onValueChange = onChange, valueRange = range)
 }
 
@@ -101,12 +111,15 @@ fun Editor() {
     var rot by remember { mutableFloatStateOf(0f) }
     var lock by remember { mutableStateOf(true) }
     var fill by remember { mutableStateOf(false) }
+    var panel by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var dur by remember { mutableLongStateOf(0L) }
     var pos by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(false) }
     val segs = remember { mutableStateListOf<Seg>() }
+    val scroll = rememberScrollState()
+    val pxPerMs = LocalDensity.current.density * 0.08f
 
     val exo = remember { ExoPlayer.Builder(ctx).build().apply { repeatMode = Player.REPEAT_MODE_OFF } }
     DisposableEffect(Unit) {
@@ -125,11 +138,17 @@ fun Editor() {
     }
     LaunchedEffect(Unit) {
         while (true) {
-            delay(100)
-            pos = exo.currentPosition
-            if (exo.isPlaying && segs.isNotEmpty() && segs.none { pos >= it.a && pos < it.b }) {
-                val nx = segs.firstOrNull { it.a > pos }
-                if (nx != null) exo.seekTo(nx.a) else { exo.pause(); exo.seekTo(segs.first().a) }
+            delay(40)
+            if (scroll.isScrollInProgress) {
+                val p = (scroll.value / pxPerMs).toLong()
+                if (abs(p - pos) > 10) { pos = p; exo.seekTo(p) }
+            } else {
+                pos = exo.currentPosition
+                if (exo.isPlaying && segs.isNotEmpty() && segs.none { pos >= it.a && pos < it.b }) {
+                    val nx = segs.firstOrNull { it.a > pos }
+                    if (nx != null) exo.seekTo(nx.a) else { exo.pause(); exo.seekTo(segs.first().a) }
+                }
+                if (dur > 0) scroll.scrollTo((pos * pxPerMs).toInt().coerceIn(0, scroll.maxValue))
             }
         }
     }
@@ -144,20 +163,43 @@ fun Editor() {
 
     val w = ((cw.toIntOrNull() ?: 1080).coerceIn(64, 4096) / 2) * 2
     val h = ((ch.toIntOrNull() ?: 1920).coerceIn(64, 4096) / 2) * 2
-    val accent = MaterialTheme.colorScheme.primary
-    val track = MaterialTheme.colorScheme.surfaceVariant
     val total = segs.sumOf { it.b - it.a }
+    val selIdx = segs.indexOfFirst { pos >= it.a && pos < it.b }
 
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("ClipForge", style = MaterialTheme.typography.headlineSmall)
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        // Верхняя панель
+        Row(
+            modifier = Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }) {
+                Text("+ Видео", color = Color.White)
+            }
+            Spacer(Modifier.weight(1f))
+            Text("${w}×${h}", color = Grey, fontSize = 13.sp)
+            Spacer(Modifier.weight(1f))
+            Button(
+                onClick = { uri?.let { exportVideo(ctx, it, segs.toList(), w, h, sx, sy, rot, fill, { s -> status = s }, { b -> busy = b }) } },
+                enabled = uri != null && segs.isNotEmpty() && !busy,
+                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp)
+            ) { Text("Экспорт") }
+        }
+        if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Cyan)
+        if (status.isNotEmpty()) Text(status, color = Cyan, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
 
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(360.dp), contentAlignment = Alignment.Center) {
+        // Предпросмотр
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(8.dp),
+            contentAlignment = Alignment.Center
+        ) {
             val r = w.toFloat() / h
             val bw = if (maxWidth / r > maxHeight) maxHeight * r else maxWidth
-            Box(modifier = Modifier.width(bw).height(bw / r).clip(RoundedCornerShape(12.dp)).background(Color.Black)) {
+            Box(
+                modifier = Modifier.width(bw).height(bw / r).clip(RoundedCornerShape(4.dp)).background(Color(0xFF101014)),
+                contentAlignment = Alignment.Center
+            ) {
                 AndroidView(
                     factory = { c ->
                         (LayoutInflater.from(c).inflate(R.layout.player_view, null) as PlayerView).also { it.player = exo }
@@ -165,97 +207,111 @@ fun Editor() {
                     update = { it.resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT },
                     modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = sx, scaleY = sy, rotationZ = rot)
                 )
+                if (uri == null) Text("Нажми «+ Видео»", color = Grey, fontSize = 14.sp)
             }
         }
 
-        Button(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
-            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Выбрать видео") }
+        // Время и Play
+        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Text("${fmt(pos)} / ${fmt(dur)}", color = Grey, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterStart))
+            Box(
+                modifier = Modifier.align(Alignment.Center).size(40.dp).clip(CircleShape).background(Color.White)
+                    .clickable(enabled = dur > 0) { if (exo.isPlaying) exo.pause() else exo.play() },
+                contentAlignment = Alignment.Center
+            ) { Text(if (playing) "⏸" else "▶", color = Color.Black, fontSize = 18.sp) }
+            Text("Итог ${fmt(total)}", color = Grey, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterEnd))
+        }
 
-        Section("Монтаж") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalButton(onClick = { if (exo.isPlaying) exo.pause() else exo.play() }, enabled = dur > 0) { Text(if (playing) "⏸" else "▶") }
-                Spacer(Modifier.width(10.dp))
-                Text("${fmt(pos)} / ${fmt(dur)}", modifier = Modifier.weight(1f), fontSize = 14.sp)
-                Text("Итог: ${fmt(total)}", fontSize = 14.sp, color = MaterialTheme.colorScheme.secondary)
-            }
-            Canvas(modifier = Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(8.dp))) {
-                drawRect(track)
-                if (dur > 0) {
-                    segs.forEach { sg ->
-                        drawRect(accent, Offset(size.width * sg.a / dur, 0f), Size(size.width * (sg.b - sg.a) / dur, size.height))
+        // Таймлайн
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(84.dp).background(Color(0xFF0B0B0F))) {
+            Row(modifier = Modifier.height(84.dp).horizontalScroll(scroll)) {
+                Spacer(Modifier.width(maxWidth / 2))
+                Canvas(modifier = Modifier.width((dur * 0.08f).dp).height(84.dp)) {
+                    val top = 24.dp.toPx()
+                    val hh = 52.dp.toPx()
+                    var s = 0L
+                    while (s <= dur) {
+                        val x = s * pxPerMs
+                        val len = if ((s / 1000) % 5 == 0L) 16.dp.toPx() else 10.dp.toPx()
+                        drawLine(Color(0x66FFFFFF), Offset(x, 4.dp.toPx()), Offset(x, len), 1.5f)
+                        s += 1000
                     }
-                    drawRect(Color.White, Offset(size.width * pos / dur - 2f, 0f), Size(4f, size.height))
+                    segs.forEach { sg ->
+                        val x = sg.a * pxPerMs
+                        val wd = (sg.b - sg.a) * pxPerMs
+                        drawRoundRect(Color(0xFF2B2B3A), Offset(x, top), Size(wd, hh), CornerRadius(10f))
+                        drawRoundRect(Color(0xFF3F3F55), Offset(x, top), Size(wd, hh * 0.35f), CornerRadius(10f))
+                        if (pos >= sg.a && pos < sg.b) {
+                            drawRoundRect(Color.White, Offset(x, top), Size(wd, hh), CornerRadius(10f), style = Stroke(4f))
+                        }
+                    }
                 }
+                Spacer(Modifier.width(maxWidth / 2))
             }
-            if (dur > 0) {
-                Slider(value = pos.toFloat().coerceIn(0f, dur.toFloat()), onValueChange = { pos = it.toLong(); exo.seekTo(it.toLong()) }, valueRange = 0f..dur.toFloat())
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = {
-                    val i = segs.indexOfFirst { pos - it.a > 200 && it.b - pos > 200 }
-                    if (i >= 0) { val s = segs[i]; segs[i] = Seg(s.a, pos); segs.add(i + 1, Seg(pos, s.b)) }
-                }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("✂ Разрезать", fontSize = 12.sp) }
-                OutlinedButton(onClick = {
-                    val n = segs.mapNotNull { if (it.b <= pos) null else Seg(maxOf(it.a, pos), it.b) }.filter { it.b - it.a > 100 }
-                    segs.clear(); segs.addAll(n)
-                }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("Обрезать до", fontSize = 12.sp) }
-                OutlinedButton(onClick = {
-                    val n = segs.mapNotNull { if (it.a >= pos) null else Seg(it.a, minOf(it.b, pos)) }.filter { it.b - it.a > 100 }
-                    segs.clear(); segs.addAll(n)
-                }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("Обрезать после", fontSize = 12.sp) }
-            }
-            segs.forEachIndexed { i, sg ->
+            Box(modifier = Modifier.align(Alignment.Center).width(2.dp).fillMaxHeight().background(Color.White))
+        }
+
+        // Панель настроек
+        if (panel.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .background(Color(0xFF17171F), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${i + 1}.  ${fmt(sg.a)} – ${fmt(sg.b)}", modifier = Modifier.weight(1f), fontSize = 14.sp)
-                    TextButton(onClick = { exo.seekTo(sg.a) }) { Text("▶") }
-                    TextButton(onClick = { segs.removeAt(i) }) { Text("Удалить") }
+                    Text(if (panel == "canvas") "Формат" else "Размер клипа", color = Color.White, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { panel = "" }) { Text("✓", color = Cyan, fontSize = 20.sp) }
+                }
+                if (panel == "canvas") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("9:16" to (1080 to 1920), "16:9" to (1920 to 1080), "1:1" to (1080 to 1080), "4:5" to (1080 to 1350)).forEach { (n, s) ->
+                            FilledTonalButton(onClick = { cw = s.first.toString(); ch = s.second.toString() }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(n) }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = cw, onValueChange = { v -> cw = v.filter { c -> c.isDigit() } },
+                            modifier = Modifier.weight(1f), label = { Text("Ширина, px") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        OutlinedTextField(
+                            value = ch, onValueChange = { v -> ch = v.filter { c -> c.isDigit() } },
+                            modifier = Modifier.weight(1f), label = { Text("Высота, px") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = lock, onCheckedChange = { lock = it })
+                        Text("Сохранять пропорции", fontSize = 13.sp, color = Color.White)
+                    }
+                    Labeled("Ширина: ${(sx * 100).toInt()}%", sx, 0.2f..3f) { sx = it; if (lock) sy = it }
+                    Labeled("Высота: ${(sy * 100).toInt()}%", sy, 0.2f..3f) { sy = it; if (lock) sx = it }
+                    Labeled("Поворот: ${rot.toInt()}°", rot, -180f..180f) { rot = it }
                 }
             }
         }
 
-        Section("Холст") {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("9:16" to (1080 to 1920), "16:9" to (1920 to 1080), "1:1" to (1080 to 1080), "4:5" to (1080 to 1350)).forEach { (n, s) ->
-                    FilledTonalButton(onClick = { cw = s.first.toString(); ch = s.second.toString() }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(n) }
-                }
+        // Нижняя панель инструментов
+        Row(modifier = Modifier.fillMaxWidth().background(Color.Black).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp)) {
+            Tool("✂️", "Разрезать", enabled = dur > 0) {
+                val i = segs.indexOfFirst { pos - it.a > 200 && it.b - pos > 200 }
+                if (i >= 0) { val s = segs[i]; segs[i] = Seg(s.a, pos); segs.add(i + 1, Seg(pos, s.b)) }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = cw, onValueChange = { v -> cw = v.filter { c -> c.isDigit() } },
-                    modifier = Modifier.weight(1f), label = { Text("Ширина, px") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-                OutlinedTextField(
-                    value = ch, onValueChange = { v -> ch = v.filter { c -> c.isDigit() } },
-                    modifier = Modifier.weight(1f), label = { Text("Высота, px") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
+            Tool("⏮️", "Обрезать слева", enabled = dur > 0) {
+                val n = segs.mapNotNull { if (it.b <= pos) null else Seg(maxOf(it.a, pos), it.b) }.filter { it.b - it.a > 100 }
+                segs.clear(); segs.addAll(n)
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = fill, onCheckedChange = { fill = it })
-                Spacer(Modifier.width(10.dp))
-                Text("Убрать чёрные полосы (заполнить кадр)", fontSize = 14.sp)
+            Tool("⏭️", "Обрезать справа", enabled = dur > 0) {
+                val n = segs.mapNotNull { if (it.a >= pos) null else Seg(it.a, minOf(it.b, pos)) }.filter { it.b - it.a > 100 }
+                segs.clear(); segs.addAll(n)
             }
+            Tool("🗑️", "Удалить", enabled = selIdx >= 0) { if (selIdx >= 0) segs.removeAt(selIdx) }
+            Tool("📐", "Формат", on = panel == "canvas") { panel = if (panel == "canvas") "" else "canvas" }
+            Tool("↔️", "Размер", on = panel == "size") { panel = if (panel == "size") "" else "size" }
+            Tool("🖼️", "Без чёрных полос", on = fill) { fill = !fill }
         }
-
-        Section("Размер клипа") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = lock, onCheckedChange = { lock = it })
-                Text("Сохранять пропорции", fontSize = 14.sp)
-            }
-            Labeled("Ширина: ${(sx * 100).toInt()}%", sx, 0.2f..3f) { sx = it; if (lock) sy = it }
-            Labeled("Высота: ${(sy * 100).toInt()}%", sy, 0.2f..3f) { sy = it; if (lock) sx = it }
-            Labeled("Поворот: ${rot.toInt()}°", rot, -180f..180f) { rot = it }
-        }
-
-        Button(
-            onClick = { uri?.let { exportVideo(ctx, it, segs.toList(), w, h, sx, sy, rot, fill, { s -> status = s }, { b -> busy = b }) } },
-            enabled = uri != null && segs.isNotEmpty() && !busy,
-            modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp)
-        ) { Text("Экспорт ${w}×${h}") }
-        if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        if (status.isNotEmpty()) Text(status, fontSize = 14.sp, color = MaterialTheme.colorScheme.secondary)
-        Spacer(Modifier.height(24.dp))
     }
 }
 
