@@ -16,6 +16,7 @@ jobs:
           gradle-version: 8.7
       - run: unzip -o clipforge.zip -d proj
       - run: cp MainActivity.kt proj/app/src/main/java/com/clipforge/app/MainActivity.kt
+      - run: sed -i 's/width(maxWidth \/ 2)/width(this@BoxWithConstraints.maxWidth \/ 2)/g' proj/app/src/main/java/com/clipforge/app/MainActivity.kt
       - name: Create own signing key
         run: |
           keytool -genkeypair -keystore proj/my.jks -alias key -keyalg RSA -keysize 2048 -validity 10000 -storepass android123 -keypass android123 -dname "CN=ClipForge, O=ClipForge, C=RU"
