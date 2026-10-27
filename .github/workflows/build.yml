@@ -16,6 +16,18 @@ jobs:
           gradle-version: 8.7
       - run: unzip -o clipforge.zip -d proj
       - run: sed -i 's/^import java.io.File$/import java.io.File\nimport androidx.media3.transformer.Composition/' proj/app/src/main/java/com/clipforge/app/MainActivity.kt
+      - name: Enable v1 signing
+        run: |
+          cat >> proj/app/build.gradle.kts <<'EOF'
+          android {
+              signingConfigs {
+                  getByName("debug") {
+                      enableV1Signing = true
+                      enableV2Signing = true
+                  }
+              }
+          }
+          EOF
       - run: cd proj && gradle assembleDebug --no-daemon
       - uses: softprops/action-gh-release@v2
         with:
